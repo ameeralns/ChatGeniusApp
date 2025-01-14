@@ -46,6 +46,52 @@ export default function AdminPage() {
     }
   };
 
+  const handlePineconeMigration = async () => {
+    if (isProcessing) return;
+    try {
+      setIsProcessing(true);
+      setStatus('Starting Pinecone migration...');
+      
+      const response = await fetch('/api/admin/migrate-messages', {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Migration failed');
+      }
+      
+      setStatus('Successfully migrated messages to Pinecone');
+    } catch (error) {
+      console.error('Error migrating to Pinecone:', error);
+      setStatus(error instanceof Error ? `Error: ${error.message}` : 'Error migrating to Pinecone');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleResetVectorDB = async () => {
+    if (isProcessing) return;
+    try {
+      setIsProcessing(true);
+      setStatus('Resetting vector database...');
+      
+      const response = await fetch('/api/vectordb/reset', {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Reset failed');
+      }
+      
+      setStatus('Successfully reset vector database');
+    } catch (error) {
+      console.error('Error resetting vector database:', error);
+      setStatus(error instanceof Error ? `Error: ${error.message}` : 'Error resetting vector database');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   if (!user) {
     return <div className="p-6">Please log in to access admin panel</div>;
   }
@@ -72,6 +118,26 @@ export default function AdminPage() {
             className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50"
           >
             Migrate Messages (Add User Profiles)
+          </button>
+        </div>
+
+        <div>
+          <button
+            onClick={handlePineconeMigration}
+            disabled={isProcessing}
+            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
+          >
+            Migrate Messages to Pinecone
+          </button>
+        </div>
+
+        <div>
+          <button
+            onClick={handleResetVectorDB}
+            disabled={isProcessing}
+            className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
+          >
+            Reset Vector Database
           </button>
         </div>
 

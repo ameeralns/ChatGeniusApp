@@ -288,16 +288,28 @@ export default function ChannelPage({ params }: Props) {
         setMessages(prev => [...prev, typingMessage]);
         scrollToBottom();
         
-        // Get AI response with preferences
+        // Get AI response with preferences and workspaceId
         try {
+          // Convert previous messages to OpenAI format
+          const conversationHistory = messages
+            .filter(msg => msg.type === 'text') // Only include text messages
+            .map(msg => ({
+              role: msg.userId === 'ai-assistant' ? 'assistant' : 'user',
+              content: msg.content
+            }));
+
+          // Add the current message
+          conversationHistory.push({ role: 'user', content: messageInput });
+
           const response = await fetch('/api/openai/chat', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              messages: [{ role: 'user', content: messageInput }],
-              preferences: aiPreferences
+              messages: conversationHistory,
+              preferences: aiPreferences,
+              workspaceId: workspaceId
             }),
           });
 

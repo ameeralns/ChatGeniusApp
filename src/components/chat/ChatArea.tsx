@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Send, Plus } from 'lucide-react';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { sendMessage, subscribeToMessages } from '@/lib/firebase/database';
+import { useMessageSync } from '@/lib/hooks/useMessageSync';
 import { MessageBubble } from './MessageBubble';
 import { ref, push, serverTimestamp } from 'firebase/database';
 import { db } from '@/lib/firebase/firebase';
@@ -48,6 +49,8 @@ export default function ChatArea({ channelId, workspaceId }: ChatAreaProps) {
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useMessageSync(workspaceId || '', channelId || '');
 
   useEffect(() => {
     if (!channelId || !workspaceId) {
