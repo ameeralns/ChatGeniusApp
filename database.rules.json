@@ -1,0 +1,48 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null && root.child('users').child(auth.uid).child('isAdmin').val() === true",
+    "workspaces": {
+      ".read": "auth != null",
+      ".indexOn": ["inviteCode"],
+      "$workspaceId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('members').child(auth.uid).exists())",
+        "inviteCode": {
+          ".read": "auth != null"
+        },
+        "members": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          "$userId": {
+            ".write": "auth != null && ($userId === auth.uid || !data.exists())"
+          }
+        },
+        "channels": {
+          ".read": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).exists()",
+          ".write": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).exists()",
+          "$channelId": {
+            "messages": {
+              ".read": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).exists()"
+            }
+          }
+        }
+      }
+    },
+    "users": {
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $userId",
+        "workspaces": {
+          "$workspaceId": {
+            ".write": "auth != null && auth.uid === $userId"
+          }
+        },
+        "isAdmin": {
+          ".write": false
+        }
+      }
+    }
+  }
+} 
