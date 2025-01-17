@@ -209,7 +209,13 @@ export default function ChannelPage({ params }: Props) {
                 }))
                 // Only filter out replies (messages with parentId), keep parent messages
                 .filter(msg => !msg.parentId)
-                .sort((a, b) => a.createdAt - b.createdAt);
+                // Sort by timestamp first, then createdAt as fallback
+                .sort((a, b) => {
+                  // Use timestamp for primary sorting
+                  const timestampA = a.timestamp || a.createdAt;
+                  const timestampB = b.timestamp || b.createdAt;
+                  return timestampA - timestampB;
+                });
               setMessages(messagesList);
             } else {
               setMessages([]);
@@ -344,15 +350,37 @@ export default function ChannelPage({ params }: Props) {
         // For regular channels, use Firebase
         const messagesRef = ref(db, `workspaces/${workspaceId}/channels/${channelId}/messages`);
         const newMessageRef = push(messagesRef);
-        await set(newMessageRef, {
+        const messageData = {
           content: messageInput,
           userId: user.uid,
           createdAt: Date.now(),
-          type: 'text',
+          timestamp: Date.now(),
+          type: 'text' as const,
           userProfile: {
             displayName: user.displayName,
             photoURL: user.photoURL
           }
+        };
+        
+        await set(newMessageRef, messageData);
+
+        // Trigger auto-responses
+        const message = {
+          id: newMessageRef.key!,
+          ...messageData
+        };
+
+        // Import the handleNewMessage function
+        const { handleNewMessage } = await import('@/lib/utils/messageHandlers');
+        
+        // Call handleNewMessage with the appropriate parameters
+        await handleNewMessage(
+          message,
+          workspaceId,
+          channelId,
+          channel?.type === 'dm'
+        ).catch(error => {
+          console.error('Error handling auto-responses:', error);
         });
       }
 
