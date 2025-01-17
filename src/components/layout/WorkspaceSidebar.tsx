@@ -7,15 +7,20 @@ import { useAuth } from '@/lib/hooks/useAuth';
 import { usePresence } from '@/lib/hooks/usePresence';
 import { useRouter, useParams } from 'next/navigation';
 import Image from 'next/image';
-import { Plus } from 'lucide-react';
+import { Plus, Bot } from 'lucide-react';
 import UserSettings from './UserSettings';
 import WorkspaceContextMenu from './WorkspaceContextMenu';
 import { CreateWorkspaceModal } from '@/app/components/modals/CreateWorkspaceModal';
 import JoinWorkspaceModal from '../workspace/JoinWorkspaceModal';
 import WorkspaceActionMenu from '../workspace/WorkspaceActionMenu';
 import { UserAvatarWithStatus } from '@/app/components/UserAvatarWithStatus';
+import AIAgentButton from '../workspace/AIAgentButton';
+import { useAIAgent } from '@/lib/contexts/AIAgentContext';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import AIAgentContextMenu from './AIAgentContextMenu';
+import { cn } from '@/lib/utils';
+import ViewPersonaModal from '../modals/ViewPersonaModal';
 
 interface Workspace {
   id: string;
@@ -40,12 +45,15 @@ export default function WorkspaceSidebar({
 }: WorkspaceSidebarProps) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; workspaceId: string } | null>(null);
+  const [aiAgentContextMenu, setAIAgentContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [actionMenuPosition, setActionMenuPosition] = useState({ x: 0, y: 0 });
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showPersonaModal, setShowPersonaModal] = useState(false);
   const { user, signOut } = useAuth();
+  const { toggleWorkspace, settings } = useAIAgent();
   const router = useRouter();
   const params = useParams();
   const currentWorkspaceId = activeWorkspaceId || (params?.workspaceId as string);
@@ -196,6 +204,21 @@ export default function WorkspaceSidebar({
     });
   };
 
+  const handleAIAgentClick = async () => {
+    if (activeWorkspaceId) {
+      await toggleWorkspace(activeWorkspaceId);
+      toast.success(settings.workspaces[activeWorkspaceId] ? 'AI Agent activated' : 'AI Agent deactivated');
+    }
+  };
+
+  const handleAIAgentContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setAIAgentContextMenu({
+      x: e.clientX,
+      y: e.clientY
+    });
+  };
+
   return (
     <>
       <div className="w-[72px] bg-[#0A0F1C]/90 backdrop-blur-xl flex flex-col items-center py-3 space-y-2 relative border-r border-white/5">
@@ -277,6 +300,29 @@ export default function WorkspaceSidebar({
 
         <div className="w-8 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
 
+        {/* AI Agent Button */}
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={handleAIAgentClick}
+          onContextMenu={handleAIAgentContextMenu}
+          className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500/10 to-purple-600/10 p-0.5 group relative"
+        >
+          <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-xl" />
+          <div className={cn(
+            "w-full h-full rounded-[14px] bg-[#0A0F1C] flex items-center justify-center group-hover:bg-transparent transition-colors relative z-10",
+            settings.workspaces[activeWorkspaceId || ''] && "bg-gradient-to-br from-indigo-500 to-purple-600"
+          )}>
+            <Bot className={cn(
+              "w-6 h-6 transition-colors",
+              settings.workspaces[activeWorkspaceId || ''] ? "text-white" : "text-indigo-500 group-hover:text-white"
+            )} />
+          </div>
+          <div className="absolute left-full ml-4 px-2 py-1 bg-black/90 text-white text-sm rounded pointer-events-none opacity-0 group-hover:opacity-100 whitespace-nowrap">
+            {settings.workspaces[activeWorkspaceId || ''] ? 'AI Agent Active' : 'AI Agent Inactive'}
+          </div>
+        </motion.button>
+
         {/* User Profile Button */}
         <motion.button
           whileHover={{ scale: 1.05 }}
@@ -330,6 +376,26 @@ export default function WorkspaceSidebar({
         isOpen={showJoinModal}
         onClose={() => setShowJoinModal(false)}
         onWorkspaceJoined={handleWorkspaceClick}
+      />
+
+      {/* Context Menus */}
+      {aiAgentContextMenu && (
+        <AIAgentContextMenu
+          x={aiAgentContextMenu.x}
+          y={aiAgentContextMenu.y}
+          onClose={() => {
+            setAIAgentContextMenu(null);
+          }}
+          onViewPersona={() => {
+            setShowPersonaModal(true);
+          }}
+        />
+      )}
+
+      {/* Persona Modal */}
+      <ViewPersonaModal 
+        isOpen={showPersonaModal}
+        onClose={() => setShowPersonaModal(false)}
       />
     </>
   );

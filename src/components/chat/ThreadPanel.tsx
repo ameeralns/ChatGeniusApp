@@ -211,7 +211,10 @@ export function ThreadPanel({ parentMessage, workspaceId, channelId, onClose }: 
 
       {/* Reply Input */}
       <div className="p-4 border-t border-gray-700">
-        <FileUpload onUpload={handleFileUpload} />
+        <FileUpload 
+          path={`threads/${parentMessage.threadId}/files`}
+          onUpload={handleFileUpload} 
+        />
         <form onSubmit={handleSubmit} className="flex gap-2 mt-2">
           <input
             type="text"

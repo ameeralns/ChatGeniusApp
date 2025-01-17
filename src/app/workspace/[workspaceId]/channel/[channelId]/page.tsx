@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase/firebase';
+import { db, storage } from '@/lib/firebase/firebase';
 import { ref, onValue, push, set, get, Unsubscribe, update } from 'firebase/database';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { Hash, Smile, Paperclip, Gift, Plus, Send, Bell, Settings, MessageSquare, X, Reply, User, Bot, Play, Square } from 'lucide-react';
 import Image from 'next/image';
@@ -12,7 +13,6 @@ import { formatDistanceToNow } from 'date-fns';
 import ChannelSidebar from '@/components/layout/ChannelSidebar';
 import UserProfileSlideOver from '@/components/layout/UserProfileSlideOver';
 import CreateChannelModal from '@/components/modals/CreateChannelModal';
-import { uploadFileToS3 } from '@/lib/aws/s3Utils';
 import { motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { addReaction, removeReaction, getOrCreateDMChannel, subscribeToThread, Message as DBMessage, subscribeToMessages } from '@/lib/firebase/database';
@@ -32,6 +32,8 @@ interface ReactionData {
 
 interface BaseMessage extends Omit<DBMessage, 'id' | 'type' | 'reactions'> {
   id: string;
+  timestamp?: number;
+  createdAt: number;
   reactions?: {
     [reactionId: string]: ReactionData;
   };
@@ -137,7 +139,7 @@ export default function ChannelPage({ params }: Props) {
   const [isSpeaking, setIsSpeaking] = useState<string | null>(null);
   const [audioRef] = useState<HTMLAudioElement | null>(() => typeof Audio !== 'undefined' ? new Audio() : null);
   const [showAIPreferences, setShowAIPreferences] = useState(false);
-  const [aiPreferences, setAiPreferences] = useState(defaultPreferences);
+  const [aiPreferences, setAIPreferences] = useState(defaultPreferences);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
 
   // Add useChat hook for AI channels
@@ -156,7 +158,7 @@ export default function ChannelPage({ params }: Props) {
         const snapshot = await get(prefsRef);
         
         if (snapshot.exists()) {
-          setAiPreferences(snapshot.val());
+          setAIPreferences(snapshot.val());
         }
       } catch (error) {
         console.error('Error loading AI preferences:', error);
@@ -381,39 +383,59 @@ export default function ChannelPage({ params }: Props) {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || !user) return;
+    if (!e.target.files || !e.target.files[0] || !user) return;
     
+    const file = e.target.files[0];
     setIsUploading(true);
-    
+    const toastId = toast.loading('Uploading file...');
+
     try {
-      const files = Array.from(e.target.files);
-      
-      for (const file of files) {
-        const fileKey = `${workspaceId}/${channelId}/${Date.now()}_${file.name}`;
-        const { url } = await uploadFileToS3(file, fileKey);
-        
-        const messagesRef = ref(db, `workspaces/${workspaceId}/channels/${channelId}/messages`);
-        const newMessageRef = push(messagesRef);
-        
-        await set(newMessageRef, {
-          content: `Shared a file: ${file.name}`,
-          userId: user.uid,
-          createdAt: Date.now(),
-          type: 'file',
-          fileData: {
-            fileName: file.name,
-            fileKey,
-            fileType: file.type,
-            url
-          }
-        });
+      // Validate file size (max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        throw new Error('File size should be less than 50MB');
       }
+
+      // Create a unique file path
+      const timestamp = Date.now();
+      const uniqueFileName = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+      const path = `workspaces/${workspaceId}/channels/${channelId}/files/${uniqueFileName}`;
+      const fileRef = storageRef(storage, path);
+      
+      // Upload to Firebase Storage
+      const snapshot = await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(snapshot.ref);
+
+      // Create message with file data
+      const messagesRef = ref(db, `workspaces/${workspaceId}/channels/${channelId}/messages`);
+      const messageRef = push(messagesRef);
+      
+      if (!messageRef.key) throw new Error('Failed to generate message key');
+
+      const messageData = {
+        content: '',
+        type: 'file',
+        userId: user.uid,
+        createdAt: Date.now(),
+        fileData: {
+          fileName: file.name,
+          fileType: file.type,
+          url
+        },
+        userProfile: {
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+        }
+      };
+
+      await set(messageRef, messageData);
+      toast.success('File uploaded successfully', { id: toastId });
     } catch (error) {
       console.error('Error uploading file:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to upload file', { id: toastId });
     } finally {
       setIsUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (e.target) {
+        e.target.value = '';
       }
     }
   };
@@ -909,7 +931,7 @@ export default function ChannelPage({ params }: Props) {
                               {isAI ? 'AI Assistant' : message.userProfile?.displayName || 'Unknown User'}
                             </button>
                             <span className="text-xs text-white/40">
-                              {formatDistanceToNow(message.createdAt, { addSuffix: true })}
+                              {formatDistanceToNow(new Date(message.timestamp || message.createdAt), { addSuffix: true })}
                             </span>
                           </div>
                           {!isAI && (
@@ -953,7 +975,34 @@ export default function ChannelPage({ params }: Props) {
                         ) : (
                           <>
                             <div className="flex items-start justify-between gap-2">
-                              <p className="text-white/80 whitespace-pre-wrap flex-1">{message.content}</p>
+                              {message.type === 'file' && message.fileData ? (
+                                <div className="flex flex-col gap-2">
+                                  <a 
+                                    href={message.fileData.url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors group max-w-md"
+                                  >
+                                    <Paperclip className="w-4 h-4 text-white/60 group-hover:text-white/80" />
+                                    <span className="text-white/80 group-hover:text-white truncate">
+                                      {message.fileData.fileName}
+                                    </span>
+                                  </a>
+                                  {message.fileData.fileType.startsWith('image/') && (
+                                    <div className="relative max-w-md rounded-lg overflow-hidden">
+                                      <Image
+                                        src={message.fileData.url}
+                                        alt={message.fileData.fileName}
+                                        width={400}
+                                        height={300}
+                                        className="object-cover"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-white/80 whitespace-pre-wrap flex-1">{message.content}</p>
+                              )}
                               {isAI && (
                                 <button
                                   onClick={() => handleSpeak(message.id, message.content)}

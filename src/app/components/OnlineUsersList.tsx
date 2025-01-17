@@ -1,36 +1,59 @@
-import { usePresence } from '@/lib/hooks/usePresence';
-import { UserAvatar } from './UserAvatar';
+import { useEffect, useState } from 'react';
+import { db } from '@/lib/firebase/firebase';
+import { ref, onValue, off } from 'firebase/database';
+import { UserAvatarWithStatus } from './UserAvatarWithStatus';
 
-export function OnlineUsersList() {
-  const { allPresence } = usePresence();
+interface UserPresence {
+  status: 'online' | 'offline' | 'away';
+  lastSeen: number;
+}
 
-  const onlineUsers = Object.entries(allPresence)
-    .filter(([_, presence]) => presence.status === 'online')
-    .sort((a, b) => {
-      const nameA = a[1].displayName || '';
-      const nameB = b[1].displayName || '';
-      return nameA.localeCompare(nameB);
-    });
+export default function OnlineUsersList() {
+  const [onlineUsers, setOnlineUsers] = useState<{ id: string; status: string }[]>([]);
+
+  useEffect(() => {
+    const presenceRef = ref(db, 'userPresence/v1');
+
+    const handlePresenceChange = (snapshot: any) => {
+      const presenceData = snapshot.val();
+      if (!presenceData) return;
+
+      const users = Object.entries(presenceData)
+        .filter(([_, presence]: [string, any]) => presence.status === 'online')
+        .map(([userId, presence]: [string, any]) => ({
+          id: userId,
+          status: presence.status
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+
+      setOnlineUsers(users);
+    };
+
+    onValue(presenceRef, handlePresenceChange);
+
+    return () => {
+      off(presenceRef);
+    };
+  }, []);
 
   if (onlineUsers.length === 0) {
     return (
-      <div className="text-sm text-gray-500 p-4">
+      <div className="p-4 text-white/60 text-sm">
         No users online
       </div>
     );
   }
 
   return (
-    <div className="space-y-2 p-4">
-      <h3 className="text-sm font-medium text-gray-500 mb-3">
-        Online Users ({onlineUsers.length})
-      </h3>
-      {onlineUsers.map(([userId, presence]) => (
-        <div key={userId} className="flex items-center gap-3">
-          <UserAvatar userId={userId} size="sm" />
-          <span className="text-sm">
-            {presence.displayName || 'Anonymous'}
-          </span>
+    <div className="p-4 space-y-2">
+      <h3 className="text-white/80 text-sm font-medium mb-3">Online Users</h3>
+      {onlineUsers.map((user) => (
+        <div key={user.id} className="flex items-center gap-3 text-white/80 hover:bg-white/5 p-2 rounded-lg">
+          <UserAvatarWithStatus
+            userId={user.id}
+            size="sm"
+            showStatus
+          />
         </div>
       ))}
     </div>

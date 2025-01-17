@@ -1,5 +1,5 @@
-const { migrateAllWorkspaces } = require('../src/lib/vectordb/migrate-messages');
-const dotenv = require('dotenv');
+import { migrateAllWorkspaces } from '../src/lib/vectordb/migrate-messages';
+import dotenv from 'dotenv';
 
 // Load environment variables
 dotenv.config({ path: '.env.local' });

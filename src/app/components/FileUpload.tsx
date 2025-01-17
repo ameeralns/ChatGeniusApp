@@ -1,69 +1,72 @@
 import { useState } from 'react';
-import { uploadFileToS3 } from '@/lib/aws/s3Utils';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { storage } from '@/lib/firebase/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { toast } from 'react-hot-toast';
 
 interface FileUploadProps {
   onUpload: (fileData: { fileName: string; fileKey: string; fileType: string; url: string }) => void;
-  path?: string;
+  path: string;
 }
 
-export default function FileUpload({ onUpload, path = 'uploads' }: FileUploadProps) {
-  const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+export default function FileUpload({ onUpload, path }: FileUploadProps) {
+  const [isUploading, setIsUploading] = useState(false);
   const { user } = useAuth();
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files[0]) {
-      setFile(event.target.files[0]);
-    }
-  };
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0] || !user) return;
 
-  const handleUpload = async () => {
-    if (!file) return;
-    
-    setUploading(true);
+    const file = e.target.files[0];
+    setIsUploading(true);
+
     try {
-      const { key, url, fileName, fileType } = await uploadFileToS3(file, path);
-      console.log('File uploaded successfully. Data:', { key, url, fileName, fileType });
-      
-      onUpload({
-        fileKey: key,
-        url,
-        fileName,
-        fileType
-      });
-      
-      // Clear the file input
-      setFile(null);
-      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-      if (fileInput) {
-        fileInput.value = '';
+      // Validate file size (max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        throw new Error('File size should be less than 50MB');
       }
-    } catch (err) {
-      console.error('Error uploading file:', err);
+
+      // Create a unique file path
+      const timestamp = Date.now();
+      const uniqueFileName = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+      const filePath = `${path}/${uniqueFileName}`;
+      const fileRef = ref(storage, filePath);
+
+      // Upload to Firebase Storage
+      const snapshot = await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(snapshot.ref);
+
+      // Call onUpload with file data
+      onUpload({
+        fileName: file.name,
+        fileKey: filePath,
+        fileType: file.type,
+        url
+      });
+
+      // Reset input
+      e.target.value = '';
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to upload file');
     } finally {
-      setUploading(false);
+      setIsUploading(false);
     }
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <input 
-        type="file" 
+    <div>
+      <input
+        type="file"
         onChange={handleFileChange}
-        className="file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+        disabled={isUploading}
+        className="block w-full text-sm text-gray-500
+          file:mr-4 file:py-2 file:px-4
+          file:rounded-full file:border-0
+          file:text-sm file:font-semibold
+          file:bg-purple-50 file:text-purple-700
+          hover:file:bg-purple-100
+          disabled:opacity-50 disabled:cursor-not-allowed"
       />
-      <button 
-        onClick={handleUpload} 
-        disabled={!file || uploading}
-        className={`px-4 py-2 rounded-lg text-sm font-semibold ${
-          !file || uploading 
-            ? 'bg-gray-100 text-gray-400' 
-            : 'bg-blue-600 text-white hover:bg-blue-700'
-        }`}
-      >
-        {uploading ? 'Uploading...' : 'Upload'}
-      </button>
     </div>
   );
 } 

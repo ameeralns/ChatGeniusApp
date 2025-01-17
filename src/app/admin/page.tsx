@@ -3,90 +3,105 @@
 import React, { useState } from 'react';
 import { syncUserWorkspaces, migrateMessagesWithUserProfiles } from '@/lib/firebase/database';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { auth } from '@/lib/firebase/firebase';
+import toast from 'react-hot-toast';
 
 export default function AdminPage() {
-  const { user } = useAuth();
-  const [status, setStatus] = useState('Ready');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [status, setStatus] = useState('Ready');
+  const { user } = useAuth();
 
   const handleSyncUsers = async () => {
-    if (isProcessing) return;
+    setIsProcessing(true);
+    setStatus('Syncing user workspaces...');
     try {
-      setIsProcessing(true);
-      setStatus('Syncing users...');
       await syncUserWorkspaces();
-      setStatus('Users synced successfully');
+      toast.success('User workspaces synced successfully');
+      setStatus('Sync completed');
     } catch (error) {
       console.error('Error syncing users:', error);
-      setStatus('Error syncing users');
+      toast.error('Failed to sync user workspaces');
+      setStatus('Sync failed');
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleMigrateMessages = async () => {
-    if (isProcessing) return;
+    setIsProcessing(true);
+    setStatus('Migrating messages to AI Assistant index...');
     try {
-      setIsProcessing(true);
-      setStatus('Starting message migration...');
-      
-      // Run the migration
-      const updatedCount = await migrateMessagesWithUserProfiles();
-      
-      if (updatedCount === 0) {
-        setStatus('No messages needed migration');
+      // Get the current user's ID token
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch('/api/admin/migrate-messages', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Migration failed');
+      }
+
+      if (result.success) {
+        const { totalMessages } = result.stats;
+        toast.success(`Migration completed: ${totalMessages} messages processed`);
+        setStatus('AI Assistant migration completed');
       } else {
-        setStatus(`Migration complete. Updated ${updatedCount} messages with user profiles.`);
+        throw new Error(result.error || result.message || 'Migration failed');
       }
     } catch (error) {
       console.error('Error migrating messages:', error);
-      setStatus(error instanceof Error ? `Error: ${error.message}` : 'Error migrating messages');
+      toast.error(error instanceof Error ? error.message : 'Failed to migrate messages');
+      setStatus('AI Assistant migration failed');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handlePineconeMigration = async () => {
-    if (isProcessing) return;
+  const handleMigrateToAIAgent = async () => {
+    setIsProcessing(true);
+    setStatus('Migrating users to AI Agent...');
     try {
-      setIsProcessing(true);
-      setStatus('Starting Pinecone migration...');
-      
-      const response = await fetch('/api/admin/migrate-messages', {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error('Migration failed');
+      // Get the current user's ID token
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error('Not authenticated');
       }
-      
-      setStatus('Successfully migrated messages to Pinecone');
-    } catch (error) {
-      console.error('Error migrating to Pinecone:', error);
-      setStatus(error instanceof Error ? `Error: ${error.message}` : 'Error migrating to Pinecone');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
-  const handleResetVectorDB = async () => {
-    if (isProcessing) return;
-    try {
-      setIsProcessing(true);
-      setStatus('Resetting vector database...');
-      
-      const response = await fetch('/api/vectordb/reset', {
+      const response = await fetch('/api/admin/migrate-ai-agent', {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
-      
+
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error('Reset failed');
+        throw new Error(result.error || 'Migration failed');
       }
-      
-      setStatus('Successfully reset vector database');
+
+      if (result.success) {
+        const { totalUsers, totalMessages, totalBios } = result.stats;
+        toast.success(`Migration completed: ${totalUsers} users, ${totalMessages} messages, ${totalBios} bios`);
+        setStatus('AI Agent migration completed');
+      } else {
+        throw new Error(result.error || result.message || 'Migration failed');
+      }
     } catch (error) {
-      console.error('Error resetting vector database:', error);
-      setStatus(error instanceof Error ? `Error: ${error.message}` : 'Error resetting vector database');
+      console.error('Error migrating to AI Agent:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to migrate users to AI Agent');
+      setStatus('AI Agent migration failed');
     } finally {
       setIsProcessing(false);
     }
@@ -123,21 +138,11 @@ export default function AdminPage() {
 
         <div>
           <button
-            onClick={handlePineconeMigration}
+            onClick={handleMigrateToAIAgent}
             disabled={isProcessing}
-            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
+            className="px-4 py-2 bg-cyan-500 text-white rounded hover:bg-cyan-600 disabled:opacity-50"
           >
-            Migrate Messages to Pinecone
-          </button>
-        </div>
-
-        <div>
-          <button
-            onClick={handleResetVectorDB}
-            disabled={isProcessing}
-            className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
-          >
-            Reset Vector Database
+            Migrate Messages for AI Agent
           </button>
         </div>
 

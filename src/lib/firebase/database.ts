@@ -252,42 +252,51 @@ export async function joinWorkspace(inviteCode: string, userId: string): Promise
   }
 }
 
-export async function getUserWorkspaces(userId: string): Promise<Workspace[]> {
-  const userWorkspacesRef = ref(db, `users/${userId}/workspaces`);
-  const snapshot = await get(userWorkspacesRef);
-
-  if (!snapshot.exists()) {
-    return [];
-  }
-
-  const workspaces: Workspace[] = [];
-  const userWorkspaces = snapshot.val();
-  const workspaceIds = Object.keys(userWorkspaces);
-
-  for (const workspaceId of workspaceIds) {
-    const workspaceRef = ref(db, `workspaces/${workspaceId}`);
-    const workspaceSnapshot = await get(workspaceRef);
-    
-    if (workspaceSnapshot.exists()) {
-      const workspaceData = workspaceSnapshot.val();
-      // Ensure the role property is properly typed
-      const members: { [key: string]: WorkspaceRole } = {};
-      Object.entries(workspaceData.members || {}).forEach(([key, value]: [string, any]) => {
-        members[key] = {
-          role: value.role === 'admin' ? 'admin' : 'member',
-          joinedAt: value.joinedAt
-        };
-      });
-
-      workspaces.push({
-        ...workspaceData,
-        id: workspaceId,
-        members
-      });
+export async function getUserWorkspaces(userId: string) {
+  try {
+    if (!userId) {
+      console.error('getUserWorkspaces: No userId provided');
+      return [];
     }
-  }
 
-  return workspaces;
+    console.log('Getting workspaces for user:', userId);
+    const userWorkspacesRef = ref(db, `users/${userId}/workspaces`);
+    const snapshot = await get(userWorkspacesRef);
+
+    if (!snapshot.exists()) {
+      console.log('No workspaces found for user:', userId);
+      return [];
+    }
+
+    const workspaces = snapshot.val();
+    const workspacePromises = Object.keys(workspaces).map(async (workspaceId) => {
+      try {
+        const workspaceRef = ref(db, `workspaces/${workspaceId}`);
+        const workspaceSnapshot = await get(workspaceRef);
+        
+        if (!workspaceSnapshot.exists()) {
+          console.warn(`Workspace ${workspaceId} not found in database`);
+          return null;
+        }
+
+        const workspaceData = workspaceSnapshot.val();
+        return {
+          id: workspaceId,
+          ...workspaceData,
+          role: workspaces[workspaceId].role
+        };
+      } catch (error) {
+        console.error(`Error fetching workspace ${workspaceId}:`, error);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(workspacePromises);
+    return results.filter(workspace => workspace !== null);
+  } catch (error) {
+    console.error('Error in getUserWorkspaces:', error);
+    throw new Error('Failed to load workspaces. Please check your connection and try again.');
+  }
 }
 
 // Channel Operations
@@ -362,47 +371,34 @@ export const sendMessage = async (
   workspaceId: string,
   content: string,
   userId: string,
+  type: 'text' | 'file' = 'text',
   fileData?: {
     fileName: string;
-    fileKey: string;
     fileType: string;
     url: string;
   }
-): Promise<string> => {
-  try {
-    const messageRef = push(ref(db, `workspaces/${workspaceId}/channels/${channelId}/messages`));
-    const messageId = messageRef.key;
-
-    if (!messageId) {
-      throw new Error('Failed to generate message ID');
-    }
-
-    // Fetch user profile
-    const userProfileRef = ref(db, `users/${userId}`);
-    const userProfileSnapshot = await get(userProfileRef);
-    const userProfile = userProfileSnapshot.val();
-
-    // Store message with user profile
-    const message = {
-      id: messageId,
-      content,
-      userId,
-      createdAt: Date.now(),
-      type: fileData ? 'file' : 'text',
-      userProfile: {
-        displayName: userProfile?.displayName || null,
-        photoURL: userProfile?.photoURL || null,
-        photoURLUpdatedAt: userProfile?.photoURLUpdatedAt || null
-      },
-      ...(fileData && { fileData })
-    };
-
-    await set(messageRef, message);
-    return messageId;
-  } catch (error) {
-    console.error('Error sending message:', error);
-    throw error;
-  }
+) => {
+  const messagesRef = ref(db, `workspaces/${workspaceId}/channels/${channelId}/messages`);
+  const userRef = ref(db, `users/${userId}`);
+  
+  // Get user profile data
+  const userSnapshot = await get(userRef);
+  const userData = userSnapshot.val();
+  
+  const messageData = {
+    content,
+    userId,
+    type,
+    createdAt: serverTimestamp(),
+    userProfile: {
+      displayName: userData?.displayName || null,
+      photoURL: userData?.photoURL || null,
+      photoURLUpdatedAt: userData?.photoURLUpdatedAt || null
+    },
+    ...(fileData && { fileData })
+  };
+  
+  await push(messagesRef, messageData);
 };
 
 export const subscribeToMessages = (

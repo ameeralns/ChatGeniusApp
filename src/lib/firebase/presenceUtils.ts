@@ -1,18 +1,14 @@
-import { ref, onValue, set, onDisconnect, serverTimestamp, get, update } from 'firebase/database';
+import { ref, onValue, set, onDisconnect, serverTimestamp, get, update, DatabaseReference } from 'firebase/database';
 import { db, auth } from './firebase';
-import { getUserProfile } from './database';
 
 export type UserPresence = {
   status: 'online' | 'offline' | 'away';
   lastSeen: number;
-  displayName: string | null;
-  photoURL: string | null;
-  photoURLUpdatedAt: number | null;
 };
 
 const PRESENCE_REF = 'userPresence/v1';
 
-const getUserPresenceRef = (userId: string) => ref(db, `${PRESENCE_REF}/${userId}`);
+const getUserPresenceRef = (userId: string): DatabaseReference => ref(db, `${PRESENCE_REF}/${userId}`);
 
 const ensureAuth = () => {
   const currentUser = auth.currentUser;
@@ -32,234 +28,116 @@ const getStoredStatus = (userId: string): 'online' | 'offline' | 'away' | null =
   return null;
 };
 
+const updatePresenceInDatabase = async (
+  updates: Record<string, any>,
+  offlineData?: UserPresence
+): Promise<void> => {
+  try {
+    // First update the presence data
+    await update(ref(db), updates);
+
+    if (offlineData) {
+      const promises = Object.keys(updates).map(path => 
+        onDisconnect(ref(db, path)).set(offlineData)
+      );
+      await Promise.all(promises);
+    }
+  } catch (error) {
+    console.error('Error updating presence in database:', error);
+    throw error;
+  }
+};
+
 export const setUserPresence = async (
   userId: string,
   data: Partial<UserPresence>
-) => {
+): Promise<UserPresence> => {
   try {
     const currentUser = ensureAuth();
     if (currentUser.uid !== userId) {
       throw new Error('Can only update your own presence');
     }
 
-    const presenceRef = getUserPresenceRef(userId);
-    
-    // Get user profile data
-    const userProfile = await getUserProfile(userId);
-    
-    const snapshot = await get(presenceRef);
-    const existingData = snapshot.val() || {};
-    
-    // Determine the correct status to use
-    const statusToUse = data.status || getStoredStatus(userId) || existingData.status || 'offline';
-    
     const timestamp = Date.now();
-    
-    // Create the presence data with all required fields
-    const currentData: UserPresence = {
-      status: statusToUse,
-      lastSeen: timestamp,
-      displayName: userProfile.displayName,
-      photoURL: userProfile.photoURL,
-      photoURLUpdatedAt: userProfile.photoURLUpdatedAt || timestamp
+    const presenceData: UserPresence = {
+      status: data.status || 'online',
+      lastSeen: timestamp
     };
-    
-    // Save to localStorage if not offline
-    if (typeof window !== 'undefined' && currentData.status !== 'offline') {
-      localStorage.setItem(`userStatus_${userId}`, currentData.status);
-    }
-    
-    // Set the presence data
-    await set(presenceRef, currentData);
 
-    // Handle disconnect state
-    if (currentData.status !== 'offline') {
-      const offlineData: UserPresence = {
-        ...currentData,
-        status: currentData.status === 'away' ? 'away' : 'offline',
-        lastSeen: timestamp
-      };
-      await onDisconnect(presenceRef).set(offlineData);
-    } else {
-      await onDisconnect(presenceRef).cancel();
-    }
+    const updates = {
+      [`${PRESENCE_REF}/${userId}`]: presenceData
+    };
 
-    return currentData;
+    const offlineData: UserPresence = {
+      status: 'offline',
+      lastSeen: timestamp
+    };
+
+    await updatePresenceInDatabase(updates, offlineData);
+
+    // Store status in localStorage for persistence
+    localStorage.setItem(`userStatus_${userId}`, presenceData.status);
+
+    return presenceData;
   } catch (error) {
-    console.error('Error setting presence:', error);
+    console.error('Error setting user presence:', error);
     throw error;
   }
 };
 
-export const setupPresenceHandlers = async (
-  userId: string
-) => {
+export const listenToUserPresence = (userId: string, callback: (presence: UserPresence | null) => void): () => void => {
+  const presenceRef = getUserPresenceRef(userId);
+  
+  const unsubscribe = onValue(presenceRef, (snapshot) => {
+    const presence = snapshot.val() as UserPresence | null;
+    callback(presence);
+  });
+
+  return unsubscribe;
+};
+
+export const listenToAllPresence = (callback: (presences: Record<string, UserPresence>) => void): () => void => {
+  const presenceRef = ref(db, PRESENCE_REF);
+  
+  const unsubscribe = onValue(presenceRef, (snapshot) => {
+    const presences = snapshot.val() as Record<string, UserPresence> | null;
+    callback(presences || {});
+  });
+
+  return unsubscribe;
+};
+
+export const setupPresenceHandlers = async (userId: string): Promise<UserPresence> => {
   try {
-    const currentUser = ensureAuth();
-    if (currentUser.uid !== userId) {
-      throw new Error('Can only setup presence for yourself');
-    }
-
-    // Get user profile data
-    const userProfile = await getUserProfile(userId);
-    const timestamp = Date.now();
-
+    const storedStatus = getStoredStatus(userId);
     const presenceRef = getUserPresenceRef(userId);
     const connectedRef = ref(db, '.info/connected');
 
-    // Get stored status or default to offline
-    const storedStatus = getStoredStatus(userId) || 'offline';
-
-    // Set initial presence
-    const initialPresence: UserPresence = {
-      status: storedStatus,
-      lastSeen: timestamp,
-      displayName: userProfile.displayName,
-      photoURL: userProfile.photoURL,
-      photoURLUpdatedAt: userProfile.photoURLUpdatedAt || timestamp
-    };
-
-    await set(presenceRef, initialPresence);
-
-    // Monitor connection state
+    // Set up connection monitoring
     onValue(connectedRef, async (snapshot) => {
       if (snapshot.val() === true) {
-        try {
-          const latestProfile = await getUserProfile(userId);
-          const reconnectStatus = getStoredStatus(userId) || 'offline';
-          
-          await setUserPresence(userId, {
-            status: reconnectStatus,
-            lastSeen: Date.now(),
-            displayName: latestProfile.displayName,
-            photoURL: latestProfile.photoURL,
-            photoURLUpdatedAt: latestProfile.photoURLUpdatedAt
-          });
-        } catch (error) {
-          console.error('Error updating presence on reconnect:', error);
-        }
+        // We're connected (or reconnected)!
+        // Set up presence and handle disconnection
+        const presence: UserPresence = {
+          status: storedStatus || 'online',
+          lastSeen: Date.now()
+        };
+
+        // When I disconnect, update the last time I was seen online
+        const offlineData: UserPresence = {
+          status: 'offline',
+          lastSeen: Date.now()
+        };
+
+        await set(presenceRef, presence);
+        await onDisconnect(presenceRef).set(offlineData);
       }
     });
 
-    return initialPresence;
+    // Return initial presence state
+    return setUserPresence(userId, { status: storedStatus || 'online' });
   } catch (error) {
     console.error('Error setting up presence handlers:', error);
-    throw error;
-  }
-};
-
-export const updateUserStatus = async (
-  userId: string, 
-  status: 'online' | 'offline' | 'away'
-) => {
-  try {
-    const currentUser = ensureAuth();
-    if (currentUser.uid !== userId) {
-      throw new Error('Can only update your own status');
-    }
-
-    // Get latest user profile data
-    const userProfile = await getUserProfile(userId);
-    const timestamp = Date.now();
-
-    // Update presence with new status
-    const updatedPresence: UserPresence = {
-      status,
-      lastSeen: timestamp,
-      displayName: userProfile.displayName,
-      photoURL: userProfile.photoURL,
-      photoURLUpdatedAt: userProfile.photoURLUpdatedAt || timestamp
-    };
-
-    // Store status in localStorage if not offline
-    if (typeof window !== 'undefined' && status !== 'offline') {
-      localStorage.setItem(`userStatus_${userId}`, status);
-    }
-
-    // Update presence in database
-    const presenceRef = getUserPresenceRef(userId);
-    await set(presenceRef, updatedPresence);
-
-    return updatedPresence;
-  } catch (error) {
-    console.error('Error updating user status:', error);
-    throw error;
-  }
-};
-
-export const listenToUserPresence = (
-  userId: string,
-  callback: (presence: UserPresence | null) => void
-) => {
-  const presenceRef = getUserPresenceRef(userId);
-  
-  return onValue(presenceRef, 
-    (snapshot) => {
-      const presence = snapshot.val();
-      callback(presence);
-    },
-    (error) => {
-      console.error('Error listening to presence:', error);
-      callback(null);
-    }
-  );
-};
-
-export const listenToAllPresence = (
-  callback: (presences: Record<string, UserPresence>) => void
-) => {
-  const presenceRef = ref(db, PRESENCE_REF);
-  
-  return onValue(presenceRef, 
-    (snapshot) => {
-      const presences = snapshot.val() || {};
-      callback(presences);
-    },
-    (error) => {
-      console.error('Error listening to all presences:', error);
-      callback({});
-    }
-  );
-};
-
-export const setAllUsersOffline = async () => {
-  try {
-    const presenceRef = ref(db, PRESENCE_REF);
-    const snapshot = await get(presenceRef);
-    
-    if (!snapshot.exists()) {
-      console.log('No presence records found');
-      return;
-    }
-
-    const presences = snapshot.val();
-    const updates: { [key: string]: UserPresence } = {};
-    const timestamp = Date.now();
-
-    // Process each user's presence
-    Object.entries(presences).forEach(([userId, presence]: [string, any]) => {
-      if (presence.status !== 'offline') {
-        updates[`${PRESENCE_REF}/${userId}`] = {
-          status: 'offline',
-          lastSeen: timestamp,
-          displayName: presence.displayName,
-          photoURL: presence.photoURL,
-          photoURLUpdatedAt: presence.photoURLUpdatedAt
-        };
-      }
-    });
-
-    // Apply all updates in a single batch if there are any
-    if (Object.keys(updates).length > 0) {
-      await update(ref(db), updates);
-      console.log(`Set ${Object.keys(updates).length} users to offline status`);
-    } else {
-      console.log('All users are already offline');
-    }
-
-    return Object.keys(updates).length;
-  } catch (error) {
-    console.error('Error setting all users offline:', error);
     throw error;
   }
 }; 

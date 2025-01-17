@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase/firebase';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, MessageCircle, Building2, Hash } from 'lucide-react';
+import { ChevronDown, MessageCircle, Building2, Hash, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 

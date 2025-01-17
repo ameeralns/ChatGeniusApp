@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { motion } from 'framer-motion';
@@ -9,27 +9,38 @@ import CreateWorkspaceModal from '@/components/workspace/CreateWorkspaceModal';
 import JoinWorkspaceModal from '@/components/workspace/JoinWorkspaceModal';
 
 export default function WelcomePage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
 
+  // Only redirect if not loading and no user
   useEffect(() => {
-    if (!user) {
-      router.push('/login');
+    if (!loading && !user) {
+      router.replace('/login');
     }
-  }, [user, router]);
+  }, [user, loading, router]);
 
-  const handleWorkspaceCreated = (workspaceId: string) => {
+  const handleWorkspaceCreated = useCallback((workspaceId: string) => {
     setShowCreateModal(false);
     router.push(`/workspace/${workspaceId}/channel/general`);
-  };
+  }, [router]);
 
-  const handleWorkspaceJoined = (workspaceId: string) => {
+  const handleWorkspaceJoined = useCallback((workspaceId: string) => {
     setShowJoinModal(false);
     router.push(`/workspace/${workspaceId}/channel/general`);
-  };
+  }, [router]);
 
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="flex-1 bg-[#313338] flex items-center justify-center">
+        <div className="text-white">Loading...</div>
+      </div>
+    );
+  }
+
+  // Don't render anything if no user (will redirect)
   if (!user) {
     return null;
   }

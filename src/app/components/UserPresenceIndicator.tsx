@@ -2,7 +2,7 @@ import { UserPresence } from '@/lib/firebase/presenceUtils';
 import { cn } from '@/lib/utils';
 
 type UserPresenceIndicatorProps = {
-  presence: UserPresence | null;
+  presence: UserPresence;
   showLabel?: boolean;
   className?: string;
 };
@@ -12,8 +12,6 @@ export function UserPresenceIndicator({
   showLabel = false,
   className 
 }: UserPresenceIndicatorProps) {
-  if (!presence) return null;
-
   const statusColors = {
     online: 'bg-green-500',
     offline: 'bg-gray-400',

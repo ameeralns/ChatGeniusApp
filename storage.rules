@@ -1,0 +1,27 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow users to upload and access their own profile photos
+    match /users/{userId}/profile/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null 
+        && request.auth.uid == userId
+        && request.resource.size < 5 * 1024 * 1024  // 5MB file size limit
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Allow access to workspace files if user is authenticated and is a member of the workspace
+    match /workspaces/{workspaceId}/channels/{channelId}/files/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null 
+        && request.resource.size < 50 * 1024 * 1024  // 50MB file size limit
+        && request.resource.contentType.matches('image/.*|video/.*|application/.*|text/.*');
+    }
+    
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+} 

@@ -69,12 +69,8 @@ export default function Chat({ workspaceId, channelId }: ChatProps) {
         workspaceId,
         '', // Empty content for file messages
         user.uid,
-        {
-          fileName: fileData.fileName,
-          fileKey: fileData.fileKey,
-          fileType: fileData.fileType,
-          url: fileData.url
-        }
+        'file', // Specify message type as 'file'
+        fileData
       );
       toast.success('File uploaded successfully');
     } catch (error) {
@@ -92,7 +88,8 @@ export default function Chat({ workspaceId, channelId }: ChatProps) {
         channelId,
         workspaceId,
         newMessage,
-        user.uid
+        user.uid,
+        'text' // Specify message type as 'text'
       );
       setNewMessage('');
     } catch (error) {

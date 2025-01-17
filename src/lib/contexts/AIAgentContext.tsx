@@ -113,9 +113,11 @@ export function AIAgentProvider({ children }: { children: ReactNode }) {
 
   const toggleDM = async () => {
     console.log('AIAgentProvider: Toggling DM');
+    const newEnabled = !settings.dmEnabled;
+    
     const newSettings = {
       ...settings,
-      dmEnabled: !settings.dmEnabled
+      dmEnabled: newEnabled
     };
     
     setSettings(newSettings);

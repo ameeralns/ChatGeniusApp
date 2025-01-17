@@ -19,7 +19,7 @@ Your responses should consistently reflect these characteristics while being hel
 IMPORTANT INSTRUCTIONS:
 1. You can ONLY use information from the current workspace's context.
 2. When asked about events, meetings, or details:
-   - If the information exists in the context, provide the EXACT date, time, and user details
+   - If the information exists in the context, respond as if you know the information firsthand
    - If the information is NOT in the context, clearly state "I don't have that information in this workspace"
 3. Never make assumptions or infer details that aren't explicitly stated in the context
 4. Always include the source (user and timestamp) when referencing information from the context`;
@@ -55,12 +55,8 @@ ${contextStr}
 Critical Instructions for Using Context:
 1. Use ONLY the context above to provide answers about events, meetings, or details
 2. If asked about something not in this context, respond with "I don't have that information in this workspace"
-3. When providing information about dates and times:
-   - Use the exact date and time format from the context
-   - Include the user who provided the information
-   - Quote the relevant part of the message if appropriate
-4. Never mix information from different workspaces - only use what's provided above
-5. If multiple messages mention the same topic, use the most recent information`;
+3. Never mix information from different workspaces - only use what's provided above
+4. If multiple messages mention the same topic, use the most recent information`;
   } else {
     prompt += '\n\nThere is no message context available in the current workspace. If asked about specific events, meetings, or details, inform the user that you don\'t have any context in this workspace.';
   }
@@ -93,7 +89,7 @@ export async function POST(req: Request) {
       relevantContext.map(ctx => ({
         content: ctx.content,
         timestamp: ctx.timestamp,
-        userId: ctx.userId,
+        userId: ctx.userName,
         workspaceId: ctx.workspaceId
       }))
     );

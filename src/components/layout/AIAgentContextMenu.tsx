@@ -57,7 +57,7 @@ export default function AIAgentContextMenu({ x, y, onClose, onViewPersona }: AIA
         className="w-full px-4 py-2 text-left text-sm text-white hover:bg-white/5 flex items-center gap-2"
       >
         <User className="w-4 h-4" />
-        View AI Persona
+        Agent Settings
       </button>
     </div>
   );

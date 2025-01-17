@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { getUserProfile } from '@/lib/firebase/database';
-import { listenToUserPresence } from '@/lib/firebase/presenceUtils';
+import { ref, onValue } from 'firebase/database';
+import { db } from '@/lib/firebase/firebase';
 
 interface UserData {
   id: string;
   displayName: string | null;
   photoURL: string | null;
   photoURLUpdatedAt?: number;
-  status?: string;
   loading: boolean;
 }
 
@@ -20,9 +20,12 @@ export function useUserData(userId: string): UserData {
   });
 
   useEffect(() => {
-    // First get the user profile
-    getUserProfile(userId)
-      .then((profile) => {
+    // Get user data from users collection
+    const userRef = ref(db, `users/${userId}`);
+    
+    const unsubscribe = onValue(userRef, (snapshot) => {
+      const profile = snapshot.val();
+      if (profile) {
         setUserData({
           id: userId,
           displayName: profile.displayName,
@@ -30,24 +33,8 @@ export function useUserData(userId: string): UserData {
           photoURLUpdatedAt: profile.photoURLUpdatedAt,
           loading: false
         });
-      })
-      .catch((error) => {
-        console.error('Error getting user profile:', error);
+      } else {
         setUserData(prev => ({ ...prev, loading: false }));
-      });
-
-    // Then listen for presence updates
-    const unsubscribe = listenToUserPresence(userId, (presence) => {
-      if (presence) {
-        setUserData((prev) => ({
-          ...prev,
-          id: userId,
-          displayName: presence.displayName || prev.displayName,
-          photoURL: presence.photoURL || prev.photoURL,
-          photoURLUpdatedAt: presence.photoURLUpdatedAt || prev.photoURLUpdatedAt,
-          status: presence.status,
-          loading: false
-        }));
       }
     });
 

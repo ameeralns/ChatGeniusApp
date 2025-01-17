@@ -1,9 +1,7 @@
-import { useState } from 'react';
-import { FileText, Smile } from 'lucide-react';
-import EmojiPicker from 'emoji-picker-react';
-import FileViewer from '@/app/components/FileViewer';
-import { useAuth } from '@/lib/hooks/useAuth';
-import { Avatar } from '@/components/ui/avatar';
+import React from 'react';
+import { format } from 'date-fns';
+import { FileIcon, Download } from 'lucide-react';
+import { UserAvatar } from '@/app/components/UserAvatar';
 
 interface MessageBubbleProps {
   message: {
@@ -11,24 +9,16 @@ interface MessageBubbleProps {
     content: string;
     userId: string;
     createdAt: number;
+    type: 'text' | 'file';
     userProfile: {
       displayName: string | null;
       photoURL: string | null;
       photoURLUpdatedAt?: number;
     };
-    type?: 'text' | 'file';
     fileData?: {
       fileName: string;
-      fileKey: string;
       fileType: string;
       url: string;
-    };
-    reactions?: {
-      [reactionId: string]: {
-        emoji: string;
-        userId: string;
-        createdAt: number;
-      }
     };
   };
   isCurrentUser: boolean;
@@ -37,82 +27,83 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ message, isCurrentUser }: MessageBubbleProps) {
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const { user } = useAuth();
+  const messageTime = format(new Date(message.createdAt), 'h:mm a');
+  const displayName = message.userProfile.displayName || 'Unknown User';
 
-  const handleReactionClick = (emoji: string) => {
-    // Handle reaction click
+  const renderFilePreview = () => {
+    if (!message.fileData) return null;
+
+    const { fileName, fileType, url } = message.fileData;
+    const isImage = fileType.startsWith('image/');
+
+    return (
+      <div className="mt-2">
+        {isImage ? (
+          <a 
+            href={url} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="block"
+          >
+            <img 
+              src={url} 
+              alt={fileName} 
+              className="max-w-xs rounded-lg shadow-md hover:opacity-90 transition-opacity"
+            />
+          </a>
+        ) : (
+          <a
+            href={url}
+            download={fileName}
+            className="flex items-center gap-2 p-3 bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors"
+          >
+            <FileIcon className="w-6 h-6 text-purple-500" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white truncate">
+                {fileName}
+              </p>
+              <p className="text-xs text-gray-400">
+                {fileType}
+              </p>
+            </div>
+            <Download className="w-5 h-5 text-gray-400" />
+          </a>
+        )}
+      </div>
+    );
   };
 
   return (
-    <div className={`flex ${isCurrentUser ? 'flex-row-reverse' : 'flex-row'} items-start gap-2 mb-4`}>
-      <Avatar 
-        src={message.userProfile.photoURL} 
-        alt={message.userProfile.displayName || 'User'} 
-        size={32}
+    <div className={`flex gap-3 ${isCurrentUser ? 'flex-row-reverse' : ''}`}>
+      <UserAvatar
+        userId={message.userId}
+        size="sm"
+        showPresence={false}
       />
-      <div className="flex flex-col">
-        <span className="text-sm text-gray-400 mb-1">
-          {message.userProfile.displayName || 'Anonymous'}
-        </span>
-        <div
-          className={`max-w-[70%] rounded-lg px-4 py-2 ${
-            isCurrentUser
-              ? 'bg-purple-600 text-white'
-              : 'bg-gray-700 text-gray-100'
-          }`}
-        >
-          {message.type === 'file' && message.fileData ? (
-            <div className="flex flex-col gap-2">
-              <FileViewer
-                fileKey={message.fileData.fileKey}
-                fileType={message.fileData.fileType}
-                fileName={message.fileData.fileName}
-                url={message.fileData.url}
-              />
-              <p className="text-xs text-gray-300">{message.fileData.fileType}</p>
-            </div>
-          ) : (
-            <div>{message.content}</div>
-          )}
-          <div className="text-xs text-gray-300 mt-1">
-            {new Date(message.createdAt).toLocaleTimeString()}
-          </div>
+      <div className={`flex flex-col ${isCurrentUser ? 'items-end' : ''}`}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-sm font-medium text-gray-300">
+            {displayName}
+          </span>
+          <span className="text-xs text-gray-500">
+            {messageTime}
+          </span>
         </div>
-
-        {/* Reactions */}
-        <div className="flex items-center gap-2 mt-1">
-          <div className="flex items-center gap-1">
-            {message.reactions && Object.entries(message.reactions).map(([reactionId, reaction]: [string, any]) => (
-              <button
-                key={reactionId}
-                onClick={() => handleReactionClick(reaction.emoji)}
-                className={`px-2 py-1 rounded-full text-xs ${
-                  reaction.userId === user?.uid
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-gray-700 text-gray-300'
-                }`}
-              >
-                {reaction.emoji}
-              </button>
-            ))}
-            <button
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="p-1 rounded-full hover:bg-gray-700 text-gray-400"
-            >
-              <Smile className="w-4 h-4" />
-            </button>
-            {showEmojiPicker && (
-              <div className="absolute mt-8">
-                <EmojiPicker
-                  onEmojiClick={(emojiData) => {
-                    handleReactionClick(emojiData.emoji);
-                    setShowEmojiPicker(false);
-                  }}
-                />
-              </div>
-            )}
-          </div>
+        <div
+          className={`
+            max-w-lg rounded-lg p-3
+            ${isCurrentUser 
+              ? 'bg-purple-600 text-white' 
+              : 'bg-gray-700 text-gray-100'
+            }
+          `}
+        >
+          {message.type === 'text' && (
+            <p className="whitespace-pre-wrap break-words">
+              {message.content}
+            </p>
+          )}
+          {message.type === 'file' && renderFilePreview()}
         </div>
       </div>
     </div>

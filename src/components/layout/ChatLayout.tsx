@@ -55,8 +55,8 @@ export default function ChatLayout() {
             members: Object.entries(workspace.members || {}).reduce((acc, [key, value]) => ({
               ...acc,
               [key]: {
-                role: value.role as 'admin' | 'member',
-                joinedAt: value.joinedAt
+                role: (value as { role: string }).role as 'admin' | 'member',
+                joinedAt: (value as { joinedAt: number }).joinedAt
               }
             }), {}),
             inviteCode: workspace.inviteCode,

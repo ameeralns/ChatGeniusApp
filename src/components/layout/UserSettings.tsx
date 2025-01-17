@@ -11,6 +11,8 @@ import { updateUserProfile } from '@/lib/firebase/database';
 import toast from 'react-hot-toast';
 import { ref, get } from 'firebase/database';
 import { db } from '@/lib/firebase/firebase';
+import { storage } from '@/lib/firebase/firebase';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface UserSettingsProps {
   onClose: () => void;
@@ -84,9 +86,89 @@ export default function UserSettings({ onClose, onSignOut }: UserSettingsProps) 
     }
   };
 
-  const handlePhotoChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (file: File) => {
+    if (!user) return;
+    
+    try {
+      setIsUpdating(true);
+      const toastId = toast.loading('Uploading photo...');
+      
+      // Upload to Firebase Storage
+      const timestamp = Date.now();
+      const uniqueFileName = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+      const path = `users/${user.uid}/profile/${uniqueFileName}`;
+      console.log('Uploading to path:', path);
+      
+      const fileRef = storageRef(storage, path);
+      
+      try {
+        console.log('Starting file upload...');
+        await uploadBytes(fileRef, file);
+        console.log('File uploaded successfully');
+      } catch (uploadError) {
+        console.error('Error uploading file:', uploadError);
+        toast.dismiss(toastId);
+        toast.error('Failed to upload photo to storage');
+        return;
+      }
+
+      let photoURL;
+      try {
+        console.log('Getting download URL...');
+        photoURL = await getDownloadURL(fileRef);
+        console.log('Got download URL:', photoURL);
+      } catch (urlError) {
+        console.error('Error getting download URL:', urlError);
+        toast.dismiss(toastId);
+        toast.error('Failed to get photo URL');
+        return;
+      }
+
+      try {
+        console.log('Updating Firebase Auth profile...');
+        await updateProfile(user, { photoURL });
+        console.log('Auth profile updated');
+      } catch (authError) {
+        console.error('Error updating auth profile:', authError);
+        // Continue anyway as this is not critical
+      }
+      
+      try {
+        console.log('Updating user profile in database...');
+        await updateUserProfile(user.uid, {
+          photoURL,
+          photoURLKey: path
+        });
+        console.log('Database profile updated');
+      } catch (dbError) {
+        console.error('Error updating database profile:', dbError);
+        toast.dismiss(toastId);
+        toast.error('Failed to update profile in database');
+        return;
+      }
+
+      try {
+        console.log('Updating presence...');
+        await updateStatus(currentUserPresence?.status || 'online');
+        console.log('Presence updated');
+      } catch (presenceError) {
+        console.error('Error updating presence:', presenceError);
+        // Continue anyway as this is not critical
+      }
+
+      toast.dismiss(toastId);
+      toast.success('Profile photo updated successfully');
+    } catch (error) {
+      console.error('Error in photo upload process:', error);
+      toast.error('Failed to update profile photo');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handlePhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !user) return;
+    if (!file) return;
 
     // Validate file type
     if (!file.type.startsWith('image/')) {
@@ -100,51 +182,10 @@ export default function UserSettings({ onClose, onSignOut }: UserSettingsProps) 
       return;
     }
 
-    try {
-      setIsUpdating(true);
-      
-      // Create form data
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('userId', user.uid);
-
-      // Upload to S3 through our API
-      const response = await fetch('/api/upload-avatar', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to upload image');
-      }
-
-      const { url, key } = await response.json();
-      
-      // Update database profile first with the S3 key
-      await updateUserProfile(user.uid, {
-        photoURL: url,
-        photoURLKey: key
-      });
-
-      // Then update auth profile with the pre-signed URL for immediate use
-      await updateProfile(user, {
-        photoURL: url
-      });
-
-      // Update presence with new photo URL
-      await updateStatus(currentUserPresence?.status || 'online');
-
-      toast.success('Profile picture updated successfully!');
-    } catch (error) {
-      console.error('Error uploading avatar:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to update profile picture. Please try again.');
-    } finally {
-      setIsUpdating(false);
-      if (event.target) {
-        event.target.value = '';
-      }
-    }
+    handlePhotoUpload(file);
+    
+    // Reset input
+    event.target.value = '';
   };
 
   const handleStatusUpdate = async (status: 'online' | 'offline' | 'away') => {
@@ -238,7 +279,7 @@ export default function UserSettings({ onClose, onSignOut }: UserSettingsProps) 
               </div>
 
               {/* User Profile */}
-              <div className="flex flex-col items-center gap-6 relative">
+              <div className="flex flex-col items-center gap-4">
                 {/* Avatar Upload */}
                 <div className="relative group">
                   <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full blur-xl opacity-50 group-hover:opacity-75 transition-opacity" />
@@ -249,24 +290,34 @@ export default function UserSettings({ onClose, onSignOut }: UserSettingsProps) 
                     onChange={handlePhotoChange}
                     className="hidden"
                     ref={fileInputRef}
+                    disabled={isUpdating}
                   />
                   <div 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="relative cursor-pointer"
+                    onClick={() => !isUpdating && fileInputRef.current?.click()}
+                    className={`relative cursor-pointer ${isUpdating ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <UserAvatarWithStatus 
                       userId={user.uid}
                       size="lg"
                       className="relative z-10 ring-2 ring-white/10 ring-offset-4 ring-offset-[#0A0F1C] transition-all duration-300 group-hover:ring-white/20 group-hover:ring-offset-8 !h-20 !w-20" 
                     />
-                    <div className="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 backdrop-blur-sm">
-                      <Camera className="w-6 h-6 text-white" />
-                      <span className="text-xs text-white/90">Change Photo</span>
+                    <div className={`absolute inset-0 bg-black/50 rounded-full ${isUpdating ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity flex flex-col items-center justify-center gap-1 backdrop-blur-sm`}>
+                      {isUpdating ? (
+                        <>
+                          <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span className="text-xs text-white/90">Uploading...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="w-6 h-6 text-white" />
+                          <span className="text-xs text-white/90">Change Photo</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* User Info */}
+                {/* User Name */}
                 <div className="text-center w-full">
                   {isEditingName ? (
                     <div className="flex items-center justify-center gap-2">
@@ -302,71 +353,6 @@ export default function UserSettings({ onClose, onSignOut }: UserSettingsProps) 
                   )}
                 </div>
 
-                {/* Bio Section */}
-                <div className="w-full px-4">
-                  <div className="text-sm text-white/60 mb-2 flex items-center gap-2">
-                    <User className="w-4 h-4" />
-                    Bio
-                  </div>
-                  {isEditingBio ? (
-                    <div className="flex flex-col gap-2">
-                      <textarea
-                        value={editedBio}
-                        onChange={(e) => setEditedBio(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                        placeholder="Write something about yourself..."
-                        rows={3}
-                        disabled={isSaving}
-                        autoFocus
-                      />
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => {
-                            setIsEditingBio(false);
-                            setEditedBio(bio);
-                          }}
-                          disabled={isSaving}
-                          className="px-3 py-1 text-sm text-white/60 hover:text-white transition-colors"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={handleBioSave}
-                          disabled={isSaving}
-                          className="px-3 py-1 text-sm bg-indigo-500 rounded-lg hover:bg-indigo-600 transition-colors disabled:opacity-50 flex items-center gap-2"
-                        >
-                          {isSaving ? (
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          ) : (
-                            <>
-                              <Check className="w-4 h-4" />
-                              Save
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="group relative">
-                      <div 
-                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white/60 min-h-[60px] hover:text-white transition-colors cursor-pointer"
-                        onClick={() => setIsEditingBio(true)}
-                      >
-                        {bio || 'Write something about yourself...'}
-                      </div>
-                      <button
-                        onClick={() => setIsEditingBio(true)}
-                        className="absolute top-2 right-2 text-white/40 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Divider */}
-                <div className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-
                 {/* Edit Buttons */}
                 <div className="flex gap-2 w-full">
                   <button
@@ -387,6 +373,9 @@ export default function UserSettings({ onClose, onSignOut }: UserSettingsProps) 
                     <span className="text-sm text-white/90 group-hover:text-white">Change Photo</span>
                   </button>
                 </div>
+
+                {/* Divider */}
+                <div className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mt-2" />
               </div>
             </motion.div>
 
@@ -427,13 +416,77 @@ export default function UserSettings({ onClose, onSignOut }: UserSettingsProps) 
                           </div>
                           {option.label}
                         </div>
-                        {isSelected && (
-                          <Check className="w-4 h-4 text-white" />
-                        )}
                       </motion.button>
                     );
                   })}
                 </div>
+              </motion.div>
+
+              {/* Bio Section */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.6 }}
+                className="mb-8"
+              >
+                <div className="text-sm text-white/60 mb-2 flex items-center gap-2">
+                  <User className="w-4 h-4" />
+                  Bio
+                </div>
+                {isEditingBio ? (
+                  <div className="flex flex-col gap-2">
+                    <textarea
+                      value={editedBio}
+                      onChange={(e) => setEditedBio(e.target.value)}
+                      className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                      placeholder="Write something about yourself..."
+                      rows={3}
+                      disabled={isSaving}
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => {
+                          setIsEditingBio(false);
+                          setEditedBio(bio);
+                        }}
+                        disabled={isSaving}
+                        className="px-3 py-1 text-sm text-white/60 hover:text-white transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleBioSave}
+                        disabled={isSaving}
+                        className="px-3 py-1 text-sm bg-indigo-500 rounded-lg hover:bg-indigo-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {isSaving ? (
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4" />
+                            Save
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="group relative">
+                    <div 
+                      className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white/60 min-h-[60px] hover:text-white transition-colors cursor-pointer"
+                      onClick={() => setIsEditingBio(true)}
+                    >
+                      {bio || 'Write something about yourself...'}
+                    </div>
+                    <button
+                      onClick={() => setIsEditingBio(true)}
+                      className="absolute top-2 right-2 text-white/40 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
               </motion.div>
             </div>
 
